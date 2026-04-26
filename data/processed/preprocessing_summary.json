@@ -1,0 +1,19 @@
+{
+  "rows_cleaned": 6663,
+  "class_distribution": {
+    "Amphi 2": 2258,
+    "Amphi 5": 1147,
+    "Amphi 8": 784,
+    "Amphi 6": 722,
+    "Amphi 4": 668,
+    "Outside": 425,
+    "Amphi 1": 287,
+    "Amphi 3": 269,
+    "Amphi 7": 103
+  },
+  "split_sizes": {
+    "train": 4664,
+    "val": 999,
+    "test": 1000
+  }
+}
