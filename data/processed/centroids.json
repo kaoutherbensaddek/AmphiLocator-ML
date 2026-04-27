@@ -1,0 +1,42 @@
+[
+  {
+    "target_label":"Amphi 1",
+    "c_lat":36.688395762,
+    "c_lon":2.8667033636
+  },
+  {
+    "target_label":"Amphi 2",
+    "c_lat":36.6883528417,
+    "c_lon":2.8664931108
+  },
+  {
+    "target_label":"Amphi 3",
+    "c_lat":36.6883886093,
+    "c_lon":2.8662355323
+  },
+  {
+    "target_label":"Amphi 4",
+    "c_lat":36.6883058294,
+    "c_lon":2.8661233245
+  },
+  {
+    "target_label":"Amphi 5",
+    "c_lat":36.6883612313,
+    "c_lon":2.8666899466
+  },
+  {
+    "target_label":"Amphi 6",
+    "c_lat":36.6883510039,
+    "c_lon":2.8664761307
+  },
+  {
+    "target_label":"Amphi 7",
+    "c_lat":36.6883584917,
+    "c_lon":2.866284405
+  },
+  {
+    "target_label":"Amphi 8",
+    "c_lat":36.6883356105,
+    "c_lon":2.8661157084
+  }
+]

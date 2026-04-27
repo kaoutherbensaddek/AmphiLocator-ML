@@ -1,0 +1,64 @@
+{
+  "distance_features": [
+    "dist_Amphi_1",
+    "dist_Amphi_2",
+    "dist_Amphi_3",
+    "dist_Amphi_4",
+    "dist_Amphi_5",
+    "dist_Amphi_6",
+    "dist_Amphi_7",
+    "dist_Amphi_8",
+    "dist_nearest",
+    "dist_2nd",
+    "dist_gap"
+  ],
+  "gps_quality_features": [
+    "log_accuracy",
+    "accuracy_bin",
+    "high_accuracy_flag"
+  ],
+  "temporal_features": [
+    "hour_of_day",
+    "hour_sin",
+    "hour_cos"
+  ],
+  "seat_features": [
+    "has_seat",
+    "seat_block_enc",
+    "seat_row_filled",
+    "seat_column_filled"
+  ],
+  "raw_gps": [
+    "latitude_mean",
+    "longitude_mean",
+    "accuracy_mean"
+  ],
+  "all_features": [
+    "dist_Amphi_1",
+    "dist_Amphi_2",
+    "dist_Amphi_3",
+    "dist_Amphi_4",
+    "dist_Amphi_5",
+    "dist_Amphi_6",
+    "dist_Amphi_7",
+    "dist_Amphi_8",
+    "dist_nearest",
+    "dist_2nd",
+    "dist_gap",
+    "log_accuracy",
+    "accuracy_bin",
+    "high_accuracy_flag",
+    "hour_of_day",
+    "hour_sin",
+    "hour_cos",
+    "has_seat",
+    "seat_block_enc",
+    "seat_row_filled",
+    "seat_column_filled",
+    "latitude_mean",
+    "longitude_mean",
+    "accuracy_mean"
+  ],
+  "target_col": "label_enc",
+  "target_col_str": "target_label"
+}
