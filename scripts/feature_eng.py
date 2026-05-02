@@ -24,7 +24,24 @@ NEVER_SCALE = {
     "accuracy_bin",
     "hour_of_day",
     "seat_block_enc", "seat_zone_id",
+    "nearest_amphi_enc",
 }
+
+DROP_COLS = [
+    "id", "user", "year", "section", "amphitheatre", "module",
+    "navigator_context", "screen_context", "network_information",
+    "battery_status", "device_info", "raw_gps_readings",
+    "collection_metadata", "created_at",
+]
+
+DROP_AFTER_FE = [
+    "seat_block", "seat_row", "seat_column",
+    "nearest_amphi",
+    "latitude_mean", "longitude_mean",
+    "gps_variance",
+    "target_label",
+    "hour_of_day",
+]
 
 
 def load_splits():
@@ -36,6 +53,11 @@ def load_splits():
     shapes = {k: v.shape for k, v in splits.items()}
     print(f"Loaded splits: {shapes}")
     return splits["train"], splits["val"], splits["test"]
+
+
+def drop_initial_cols(df: pd.DataFrame) -> pd.DataFrame:
+    existing = [c for c in DROP_COLS if c in df.columns]
+    return df.drop(columns=existing)
 
 
 def compute_centroids(train: pd.DataFrame) -> pd.DataFrame:
@@ -76,88 +98,78 @@ def add_distance_features(df: pd.DataFrame, centroids: pd.DataFrame):
     return df, dist_cols
 
 
-def add_gps_quality_features(df: pd.DataFrame) -> pd.DataFrame:
+def encode_nearest_amphi(train, val, test):
+    le_nearest = LabelEncoder()
+    le_nearest.fit(train["nearest_amphi"])
+    for df in [train, val, test]:
+        df["nearest_amphi_enc"] = le_nearest.transform(df["nearest_amphi"])
+    return train, val, test, le_nearest
+
+
+def add_gps_quality_features(df: pd.DataFrame, acc_median: float = None):
     df = df.copy()
-
-    acc_median = df["accuracy_mean"].median()
-    df["log_accuracy"] = np.log1p(df["accuracy_mean"].fillna(acc_median))
-
-    df["accuracy_bin"] = pd.cut(
+    if acc_median is None:
+        acc_median = df["accuracy_mean"].median()
+    df["log_accuracy"]      = np.log1p(df["accuracy_mean"].fillna(acc_median))
+    df["accuracy_bin"]      = pd.cut(
         df["accuracy_mean"].fillna(999),
         bins=[0, 30, 80, 999],
         labels=[0, 1, 2],
     ).astype(int)
-
     df["high_accuracy_flag"] = (df["accuracy_mean"] < 30).astype(int)
-
-    return df
+    return df, acc_median
 
 
 def add_seat_features(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
-
-    df["has_seat"] = df["seat_row"].notna().astype(int)
-
-    block_map = {"Left": 0, "Center": 1, "Right": 2}
+    df["has_seat"]           = df["seat_row"].notna().astype(int)
+    block_map                = {"Left": 0, "Center": 1, "Right": 2}
     df["seat_block_enc"]     = df["seat_block"].map(block_map).fillna(3).astype(int)
     df["seat_row_filled"]    = df["seat_row"].fillna(-1)
     df["seat_column_filled"] = df["seat_column"].fillna(-1)
-
-    df["seat_zone_id"] = np.where(
+    df["seat_zone_id"]       = np.where(
         df["has_seat"] == 0,
         -1,
         (df["seat_row_filled"] * 100 + df["seat_column_filled"]).astype(int),
     )
-
     return df
 
 
 def add_temporal_features(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    ts = df["timestamp"]
-
+    df   = df.copy()
+    ts   = df["timestamp"]
     df["hour_of_day"] = ts.dt.hour
     df["hour_sin"]    = np.sin(2 * np.pi * df["hour_of_day"] / 24)
     df["hour_cos"]    = np.cos(2 * np.pi * df["hour_of_day"] / 24)
-
     return df
 
 
 def encode_labels(train, val, test):
     le = LabelEncoder()
     le.fit(train[TARGET_COL])
-
     for df in [train, val, test]:
         df["label_enc"] = le.transform(df[TARGET_COL])
-
     label_map = {str(cls): int(idx) for idx, cls in enumerate(le.classes_)}
     print("Label mapping:", label_map)
     (PROCESSED / "label_map.json").write_text(json.dumps(label_map, indent=2))
     return train, val, test, label_map
 
 
+def drop_after_fe(df: pd.DataFrame) -> pd.DataFrame:
+    existing = [c for c in DROP_AFTER_FE if c in df.columns]
+    return df.drop(columns=existing)
+
+
 def build_feature_lists(dist_cols: list) -> dict:
-    distance_features = dist_cols + ["dist_nearest", "dist_2nd", "dist_gap"]
-
-    gps_quality_features = [
-        "log_accuracy", "accuracy_bin", "high_accuracy_flag"
-    ]
-
-    temporal_features = [
-        "hour_of_day", "hour_sin", "hour_cos"
-    ]
-
-    seat_features = [
-        "has_seat", "seat_block_enc", "seat_row_filled", "seat_column_filled"
-    ]
-
-    raw_gps = [
-        "latitude_mean", "longitude_mean", "accuracy_mean"
-    ]
+    distance_features    = dist_cols + ["dist_nearest", "dist_2nd", "dist_gap", "nearest_amphi_enc"]
+    gps_quality_features = ["log_accuracy", "accuracy_bin", "high_accuracy_flag"]
+    temporal_features    = ["hour_sin", "hour_cos"]
+    seat_features        = ["has_seat", "seat_block_enc", "seat_row_filled", "seat_column_filled"]
+    other_features       = ["accuracy_mean", "is_outside", "sample_count"]
 
     all_features = (
         distance_features + gps_quality_features +
-        temporal_features + seat_features + raw_gps
+        temporal_features + seat_features + other_features
     )
 
     return {
@@ -165,7 +177,7 @@ def build_feature_lists(dist_cols: list) -> dict:
         "gps_quality_features": gps_quality_features,
         "temporal_features":    temporal_features,
         "seat_features":        seat_features,
-        "raw_gps":              raw_gps,
+        "other_features":       other_features,
         "all_features":         all_features,
         "target_col":           "label_enc",
         "target_col_str":       TARGET_COL,
@@ -195,7 +207,6 @@ def scale_features(train, val, test, all_features: list):
     mean_ok = abs(train_s[scaling_features].mean().mean()) < 0.01
     std_ok  = abs(train_s[scaling_features].std().mean() - 1) < 0.05
     print(f"\nScaling sanity — mean~0: {mean_ok}  |  std~1: {std_ok}")
-
     if not std_ok:
         print("WARNING: std check failed")
 
@@ -205,9 +216,9 @@ def scale_features(train, val, test, all_features: list):
 def save_outputs(train, val, test, train_s, val_s, test_s,
                  scaler, feature_config, centroids):
 
-    train.to_csv(PROCESSED / "train_fe.csv",  index=False)
-    val.to_csv(PROCESSED   / "val_fe.csv",    index=False)
-    test.to_csv(PROCESSED  / "test_fe.csv",   index=False)
+    train.to_csv(PROCESSED / "train_fe.csv",        index=False)
+    val.to_csv(PROCESSED   / "val_fe.csv",          index=False)
+    test.to_csv(PROCESSED  / "test_fe.csv",         index=False)
 
     train_s.to_csv(PROCESSED / "train_fe_scaled.csv", index=False)
     val_s.to_csv(PROCESSED   / "val_fe_scaled.csv",   index=False)
@@ -236,6 +247,11 @@ def main():
 
     train, val, test = load_splits()
 
+    print("\n[2] Dropping initial columns...")
+    train = drop_initial_cols(train)
+    val   = drop_initial_cols(val)
+    test  = drop_initial_cols(test)
+
     centroids = compute_centroids(train)
 
     print("\n[3] Distance features...")
@@ -244,10 +260,14 @@ def main():
     test,  _         = add_distance_features(test,  centroids)
     print(f"    {len(dist_cols)} centroid distances + 3 summary features added")
 
+    print("\n[3b] Encoding nearest_amphi...")
+    train, val, test, le_nearest = encode_nearest_amphi(train, val, test)
+    joblib.dump(le_nearest, PROCESSED / "le_nearest_amphi.pkl")
+
     print("\n[4] GPS quality features...")
-    train = add_gps_quality_features(train)
-    val   = add_gps_quality_features(val)
-    test  = add_gps_quality_features(test)
+    train, acc_median = add_gps_quality_features(train)
+    val,   _          = add_gps_quality_features(val,  acc_median)
+    test,  _          = add_gps_quality_features(test, acc_median)
 
     print("\n[5] Seat features...")
     train = add_seat_features(train)
@@ -263,12 +283,25 @@ def main():
     print("\n[7] Label encoding...")
     train, val, test, _ = encode_labels(train, val, test)
 
+    print("\n[7b] Dropping post-FE columns...")
+    train = drop_after_fe(train)
+    val   = drop_after_fe(val)
+    test  = drop_after_fe(test)
+
+    # convert is_outside bool -> int if present
+    for df in [train, val, test]:
+        if "is_outside" in df.columns and df["is_outside"].dtype == bool:
+            df["is_outside"] = df["is_outside"].astype(int)
+
     feature_config = build_feature_lists(dist_cols)
     all_features   = feature_config["all_features"]
     print(f"\n[8] Feature set: {len(all_features)} total features")
     for group, cols in feature_config.items():
         if isinstance(cols, list) and group != "all_features":
             print(f"    {group:25s}: {len(cols)}")
+
+    print(f"\n    Missing values — train: {train.isnull().sum().sum()} | "
+          f"val: {val.isnull().sum().sum()} | test: {test.isnull().sum().sum()}")
 
     print("\n[9] Scaling...")
     train_s, val_s, test_s, scaler, scaling_features = scale_features(

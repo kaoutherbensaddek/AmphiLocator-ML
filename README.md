@@ -40,39 +40,43 @@ Generated files are saved in `data/processed/`:
 - `train_scaled.csv`, `val_scaled.csv`, `test_scaled.csv`
 - `preprocessing_summary.json`
 
-Feature Engineering
-Run the feature engineering script:
+## Feature Engineering Pipeline
+
+Run the feature engineering pipeline with:
 
 `python scripts/feature_engineering.py`
 
-This pipeline:
-- computes amphitheatre centroids from training set only (prevents data leakage)
-- creates distance features (Euclidean distance to each amphitheatre centroid)
-- adds GPS quality features (log accuracy, accuracy bins, high-accuracy flag)
-- extracts temporal features (hour of day with cyclic sin/cos encodings)
-- encodes seat information (block, row, column with proper handling of missing values)
-- converts string labels to integers for modeling
-- scales engineered features for distance-based models
+This pipeline constructs meaningful features from raw GPS data:
 
-Generated files are saved in data/processed/:
+### Spatial Features
+- **Distance to each amphitheatre** (`dist_Amphi_1` to `dist_Amphi_8`): Euclidean distance from GPS point to each amphitheatre centroid (centroids computed from training set only to prevent leakage)
+- **Nearest amphitheatre distance** (`dist_nearest`): Distance to the closest amphitheatre
+- **Second nearest distance** (`dist_2nd`): Distance to the second closest amphitheatre  
+- **Ambiguity gap** (`dist_gap`): `dist_2nd - dist_nearest` — small gap indicates the point lies between two amphitheatres (high ambiguity)
 
-| File | Description |
-|------|-------------|
-| train_fe.csv, val_fe.csv, test_fe.csv | Engineered features (original scale) |
-| train_fe_scaled.csv, val_fe_scaled.csv, test_fe_scaled.csv | Scaled engineered features |
-| centroids.json | GPS centroids per amphitheatre |
-| feature_cols.json | Feature names organized by category |
-| label_map.json | String label → integer mapping |
-| scaler_fe.pkl | Fitted StandardScaler for inference |
+### GPS Quality Features
+- **Log accuracy** (`log_accuracy`): Log-transformed GPS accuracy (compresses the heavy right tail)
+- **Accuracy bin** (`accuracy_bin`): Discretized accuracy (0: ≤30m good, 1: 30-80m ok, 2: >80m bad)
+- **High accuracy flag** (`high_accuracy_flag`): Binary indicator for accuracy < 30m
 
-Feature categories (24 total):
+### Seat Features (when available)
+- **Has seat flag** (`has_seat`): Indicates whether seat information exists
+- **Seat zone ID** (`seat_zone_id`): Unique identifier combining row and column (e.g., row 3, column 5 → 305)
+- **Encoded seat block** (`seat_block_enc`): Left=0, Center=1, Right=2, Unknown=3
+- **Filled row/column** (`seat_row_filled`, `seat_column_filled`): Missing values replaced with -1
 
-| Category | Count | Features |
-|----------|-------|----------|
-| Distance | 11 | distances to all 8 amphitheatres + nearest, 2nd, gap |
-| GPS quality | 3 | log_accuracy, accuracy_bin, high_accuracy_flag |
-| Temporal | 3 | hour_of_day, hour_sin, hour_cos |
-| Seat | 4 | has_seat, seat_block_enc, seat_row_filled, seat_column_filled |
-| Raw GPS | 3 | latitude_mean, longitude_mean, accuracy_mean |
+### Temporal Features
+- **Hour of day** (cyclic encoded): `hour_sin` and `hour_cos` — captures lecture schedule patterns
+- **Note**: Day of week and weekend indicators were **excluded** because they encode data collection schedule, not real-world signal
 
-Note: gps_variance and sample_count_clipped were dropped (constant zero). day_of_week and is_weekend were excluded (they encode collection schedule, not real signal).
+### Label Encoding
+- Target labels (`Amphi 1` to `Amphi 8`, `Outside`) are encoded as integers (0-8)
+
+### Output Files
+- `train_ready.csv`, `val_ready.csv`, `test_ready.csv`: Final feature-engineered datasets ready for modeling
+
+### Key Design Decisions
+- Centroids computed from **training set only** — prevents data leakage into validation/test
+- Raw latitude/longitude are **dropped** after distance calculation — distance features provide cleaner spatial representation
+- `gps_variance` dropped (constant 0 after preprocessing)
+- Day-of-week features dropped (collection schedule bias)
