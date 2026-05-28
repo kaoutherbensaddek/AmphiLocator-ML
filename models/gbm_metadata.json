@@ -1,0 +1,31 @@
+{
+  "features": [
+    "dist_Amphi_1",
+    "dist_Amphi_2",
+    "dist_Amphi_3",
+    "dist_Amphi_4",
+    "dist_Amphi_5",
+    "dist_Amphi_6",
+    "dist_Amphi_7",
+    "dist_Amphi_8",
+    "dist_nearest",
+    "dist_2nd",
+    "dist_gap",
+    "accuracy_mean",
+    "log_accuracy",
+    "accuracy_bin",
+    "high_accuracy_flag",
+    "sample_count",
+    "dist_nearest_x_logacc",
+    "dist_gap_x_highacc",
+    "dist_nearest_sqrt"
+  ],
+  "target": "label_enc",
+  "outside_label": 8,
+  "best_params": {
+    "learning_rate": 0.1,
+    "max_depth": 7,
+    "max_iter": 100
+  },
+  "outside_detection": "confidence_threshold"
+}
