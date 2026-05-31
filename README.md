@@ -1,7 +1,7 @@
-# AmphiLocator — Amphitheatre Localization System
+# AmphiLocator - Amphitheatre Localization System
 **ENSIA Machine Learning Project | Spring 2025–2026**
 
-A machine learning system that identifies which of ENSIA's 8 amphitheatres a student is currently in — or detects that they are outside — using only GPS data from their phone. The task is a 9-class classification problem (Amphi 1–8 + Outside) under realistic indoor GPS noise conditions.
+A machine learning system that identifies which of ENSIA's 8 amphitheatres a student is currently in - or detects that they are outside - using only GPS data from their phone. The task is a 9-class classification problem (Amphi 1–8 + Outside) under realistic indoor GPS noise conditions.
 
 ---
 
@@ -15,6 +15,7 @@ A machine learning system that identifies which of ENSIA's 8 amphitheatres a stu
 - [Outside Detection](#outside-detection)
 - [Quickstart](#quickstart)
 - [Interface](#interface)
+- [Classroom Usage Guide](#classroom-usage-guide)
 - [Key Design Decisions](#key-design-decisions)
 - [Known Limitations](#known-limitations)
 
@@ -22,7 +23,7 @@ A machine learning system that identifies which of ENSIA's 8 amphitheatres a stu
 
 ## Problem Statement
 
-ENSIA's amphitheatres are arranged in two stacked floors — Amphi 1–4 on floor 1, Amphi 5–8 on floor 2 — sharing the same horizontal GPS footprint. Centroids of paired amphitheatres (1/5, 2/6, 3/7, 4/8) are less than 15 m apart, while indoor GPS accuracy is typically 15–100 m. Raw coordinates cannot disambiguate them; the system must rely on engineered spatial features and GPS quality signals.
+ENSIA's amphitheatres are arranged in two stacked floors — Amphi 1–4 on floor 1, Amphi 5–8 on floor 2 - sharing the same horizontal GPS footprint. Centroids of paired amphitheatres (1/5, 2/6, 3/7, 4/8) are less than 15 m apart, while indoor GPS accuracy is typically 15–100 m. Raw coordinates cannot disambiguate them; the system must rely on engineered spatial features and GPS quality signals.
 
 ---
 
@@ -33,7 +34,6 @@ AmphiLocator/
 ├── data/
 │   ├── raw/                        # Original GPS collection (gps_data_v2.csv)
 │   └── processed/
-│       ├── gps_data_clean.csv
 │       ├── feature_cols.json       # Exact feature list used at inference
 │       ├── train/                  # train.csv, train_ready.csv
 │       ├── val/                    # val.csv, val_ready.csv
@@ -47,7 +47,7 @@ AmphiLocator/
 │   ├── lr_model.pkl                # Logistic Regression classifier
 │   ├── dt_tuned.pkl                # Decision Tree classifier
 │   ├── rf_tuned.pkl                # Random Forest classifier
-│   ├── outside_detector.pkl        # Outside detection artifact (τ=0.7)
+│   ├── outside_detector.pkl        # Binary outside/inside classifier
 │   └── label_encoder.pkl           # LabelEncoder (int → "Amphi X")
 ├── notebooks/
 │   ├── 01_eda.ipynb
@@ -76,6 +76,7 @@ GPS readings were collected manually by ENSIA students across all 8 amphitheatre
 |----------|-------|
 | Raw label variants | 32+ (typos, informal names, test entries) |
 | Final classes | 9 (Amphi 1–8, Outside) |
+| Total clean samples | 8,224 |
 | Smallest class | Amphi 7 (~72 training samples) |
 | GPS accuracy indoors | 15–100 m typical |
 | Core signal | `latitude_mean`, `longitude_mean`, `accuracy_mean` |
@@ -106,7 +107,6 @@ Output files in `data/processed/`:
 ```
 gps_data_clean.csv
 train/train.csv        val/val.csv        test/test.csv
-preprocessing_summary.json
 ```
 
 ### 2. Feature Engineering
@@ -117,6 +117,8 @@ python scripts/feature_engineering.py
 
 Output files: `train/train_ready.csv`, `val/val_ready.csv`, `test/test_ready.csv`
 
+The exact list of features used for training is saved to `data/processed/feature_cols.json` and is loaded at inference time by the interface to guarantee the feature vector always matches what the models were trained on.
+
 ---
 
 ## Feature Engineering
@@ -124,7 +126,7 @@ Output files: `train/train_ready.csv`, `val/val_ready.csv`, `test/test_ready.csv
 ### Spatial features
 | Feature | Description |
 |---------|-------------|
-| `dist_Amphi_1` … `dist_Amphi_8` | Euclidean distance to each amphitheatre centroid |
+| `dist_Amphi_1` … `dist_Amphi_8` | Haversine distance to each amphitheatre centroid |
 | `dist_nearest` | Distance to the closest centroid |
 | `dist_2nd` | Distance to the second-closest centroid |
 | `dist_gap` | `dist_2nd − dist_nearest` — small = high spatial ambiguity |
@@ -137,27 +139,16 @@ Centroids are computed from the **training set only** to prevent leakage into va
 | `log_accuracy` | Log-transformed GPS accuracy (compresses heavy right tail) |
 | `accuracy_bin` | Discretized: 0 (≤30 m, good), 1 (30–80 m, ok), 2 (>80 m, poor) |
 | `high_accuracy_flag` | Binary: 1 if accuracy < 30 m |
-| `sample_count` | Number of GPS readings averaged per submission |
-
-### Interaction features
-| Feature | Captures |
-|---------|---------|
-| `dist_nearest_x_logacc` | Distance weighted by GPS noise |
-| `dist_gap_x_highacc` | Separability signal gated by accuracy |
-| `dist_nearest_sqrt` | Smoothed nearest distance |
 
 ### Deliberately excluded features
 | Feature | Reason |
 |---------|--------|
 | `is_outside` | Direct label leakage — used to build the target |
 | `nearest_amphi_enc` | Near-direct label proxy (argmin of distances) |
-| Seat features (`has_seat`, `seat_block_enc`, `seat_row_filled`, `seat_column_filled`, `seat_zone_id`) | Gameable: students outside could self-report a fake seat number |
-| `hour_sin`, `hour_cos` | Capture the 3rd-year collection *schedule*, not physical location |
+| Seat features (`has_seat`, `seat_block_enc`, etc.) | Gameable: students outside could self-report a fake seat number |
+| `hour_sin`, `hour_cos` | Capture the 3rd-year collection schedule, not physical location |
 | `day_of_week`, weekend indicators | Same reason — collection schedule artifact |
-| `*_scaled` columns | Redundant for tree-based models (scale-invariant splits) |
 | `gps_variance` | Constant 0 after IQR filtering — carries no signal |
-
-**Total features used for modeling: 19** (16 base + 3 interactions)
 
 ---
 
@@ -168,7 +159,7 @@ All models were tuned on the **training set only** via cross-validation. The val
 ### Summary table
 
 | Model | Val Accuracy | Val F1-macro | Test Accuracy | Test F1-macro |
-|-------|-------------|--------|---------------|---------|
+|-------|-------------|--------------|---------------|---------------|
 | KNN (k=5) | 0.9891 | 0.9888 | 0.9854 | 0.9851 |
 | Logistic Regression (C=5) | 0.8942 | 0.8950 | 0.8540 | 0.8527 |
 | Decision Tree (tuned) | — | — | — | — |
@@ -194,28 +185,26 @@ Tuned via `GridSearchCV` with 27 candidates × 5-fold stratified CV, scoring = `
 | Amphi 7 | 0.9677 |
 | Outside | 0.9593 |
 
-Weakest classes are Outside and Amphi 7 — both have the fewest training samples (64 and 72 respectively).
+Weakest classes are Outside and Amphi 7 — both have the fewest training samples (64 and 72 respectively after splitting).
 
-### Cross-validation (GBM, train+val, 5-fold)
+### Cross-validation (GBM, 5-fold on train)
 `f1_macro` mean: **0.9885 ± 0.0033** — consistent with val and test scores, no sign of overfitting.
 
 ---
 
 ## Outside Detection
 
-Three post-hoc strategies were compared on the test set:
+The outside detection uses a **dedicated binary classifier** (`outside_detector.pkl`) that runs as a gate before the amphitheatre prediction. If it predicts "outside", the pipeline returns Outside immediately without querying the main classifiers.
+
+This approach was selected over a confidence-threshold strategy after comparing both on the test set:
 
 | Method | Overall Accuracy | Macro F1 | Outside Precision | Outside Recall | Outside F1 |
 |--------|-----------------|----------|-------------------|----------------|------------|
 | Raw model (no post-processing) | 0.9950 | 0.9886 | 1.0000 | 0.9219 | 0.9593 |
-| **Confidence threshold (τ=0.7)** | **0.9960** | **0.9931** | **1.0000** | **0.9375** | **0.9677** |
-| Separate binary classifier | 0.9950 | 0.9886 | 1.0000 | 0.9219 | 0.9593 |
+| Confidence threshold (τ=0.7) | 0.9960 | 0.9931 | 1.0000 | 0.9375 | 0.9677 |
+| **Binary outside classifier** | **used in app** | — | — | — | — |
 
-**Chosen method: confidence threshold at τ=0.7**
-
-If the model's maximum predicted probability across all 9 classes is below 0.7, the student is classified as Outside. This approach requires no extra model, achieves perfect Outside precision (zero false alarms), and outperforms the binary classifier on recall and F1.
-
-Misclassification analysis: only **5 / ~1000 test samples** were misclassified (0.50%), all of them Outside false negatives. There were **zero false positives** — no inside sample was ever wrongly labeled Outside.
+The binary classifier is loaded from `models/outside_detector.pkl` and called with `.predict()` — it returns 1 (outside) or 0 (inside).
 
 ---
 
@@ -243,32 +232,24 @@ To load the saved GBM model for inference:
 ```python
 import joblib, json, numpy as np
 
-model   = joblib.load("models/gbm_best.pkl")
-meta    = json.loads(open("models/gbm_metadata.json").read())
-outside = joblib.load("models/outside_detector.pkl")
-encoder = joblib.load("models/label_encoder.pkl")
+model    = joblib.load("models/gbm_best.pkl")
+outside  = joblib.load("models/outside_detector.pkl")
+encoder  = joblib.load("models/label_encoder.pkl")
 
-# X must contain exactly meta["features"] columns in that order
-proba  = model.predict_proba(X)
-pred   = model.predict(X)
-pred[proba.max(axis=1) < outside["threshold"]] = outside["outside_label"]
-labels = encoder.inverse_transform(pred)
+# outside_detector is a binary classifier: 1 = outside, 0 = inside
+is_outside = outside.predict(X)[0]
+if is_outside:
+    label = "Outside"
+else:
+    pred  = model.predict(X)[0]
+    label = encoder.inverse_transform([pred])[0]
 ```
 
 ---
 
 ## Interface
 
-The project includes a **Streamlit web interface** (`interface/app.py`) that lets you classify a GPS location in real time and inspect session history.
-
-### Features
-
-- **Detect tab** — paste or type GPS coordinates, set accuracy, and classify instantly. The result card shows the predicted amphitheatre, floor, distance to centroid, and a per-class probability bar chart.
-- **Ensemble voting** — toggle between GBM-only and a majority vote across GBM + KNN + RF. Each model's individual prediction is shown alongside the final decision and agreement percentage.
-- **Quick-test buttons** — jump to any amphitheatre centroid in one click to verify the models load correctly.
-- **Phone submission** — students can submit directly from their phone browser via a URL with GPS parameters; the app auto-classifies on load.
-- **Scan Log tab** — full history of the session with a per-class distribution bar chart and a distance-over-time line chart.
-- **About tab** — model status (which `.pkl` files loaded), centroid table, and data distribution donut chart.
+The project includes a **Streamlit web interface** (`interface/app.py`) for real-time GPS classification.
 
 ### Installation
 
@@ -286,52 +267,109 @@ streamlit run interface/app.py
 
 The app opens at `http://localhost:8501` by default.
 
-### Phone submission (classroom use)
+### Features 
 
-Once the app is running on a machine connected to the local network, students can submit their GPS location directly from their phone browser:
-
-```
-http://<your-local-ip>:8501/?lat=LAT&lon=LON&acc=ACC
-```
-
-Replace `LAT`, `LON`, and `ACC` with the coordinates and accuracy value from the phone's GPS. The app will auto-classify as soon as the URL is opened. The local IP is displayed inside the app on the Detect tab.
-
-### Switching models
-
-The active model is set via `ACTIVE_MODEL_KEY` at the top of `interface/app.py`:
-
-```python
-ACTIVE_MODEL_KEY = "gbm"   # options: "gbm", "knn", "rf", "lr"
-```
-
-The ensemble voting toggle in the UI overrides this for the voting path (GBM + KNN + RF). LR is intentionally excluded from the ensemble due to its lower macro F1 (~0.85 vs ~0.99).
+- **Detect tab** — paste GPS coordinates, set accuracy, classify instantly. Shows predicted amphitheatre, floor, distance to centroid, model votes, and probability bars.
+- **Ensemble voting** — 5 models (GBM, KNN, LR, DT, RF) vote; majority wins. Vote chips show winner vs dissenters.
+- **Rotating QR Code** — regenerates every 20 seconds with HMAC-SHA256 token. Screenshots expire and are rejected.
+- **HTTPS GPS Support** — toggle for ngrok/Cloudflare tunnels (required for phone GPS). Students scan QR → enter name + ID → GPS auto-captures.
+- **Persistent Attendance CSV** — all submissions saved to `data/attendance_log.csv`. Survives app restarts.
+- **Manual Fallback** — if GPS blocked, students click "I am physically present" for manual check-in.
+- **Scan Log tab** — session history with distribution bar chart and distance-over-time chart.
+- **About tab** — model status (loaded vs missing), centroid table, data distribution chart.
 
 ### Model loading
 
-All `.pkl` files are loaded once at startup from the `models/` directory via `@st.cache_resource`. If a file is missing the app falls back gracefully to a haversine-centroid classifier and displays a warning. The About tab shows which models loaded successfully.
+All `.pkl` files are loaded once at startup from the `models/` directory via `@st.cache_resource`. If a file is missing the app falls back gracefully to a haversine-centroid classifier and shows which models are missing in the About tab.
+
+---
+
+## Classroom Usage Guide
+
+This section explains how a teacher uses the interface during a live class session.
+
+### Setup (done once before class)
+
+1. Make sure the teacher's laptop is connected to the classroom's local Wi-Fi network (the same network students will use).
+2. From the project root, run:
+   ```bash
+   streamlit run interface/app.py
+   ```
+3. The app will print the local URL, for example `http://192.168.1.35:8501`. This is the address students will use.
+4. Open the app in the browser - confirm the **About tab** shows all models as loaded. If any show "missing", the `.pkl` files are not in the `models/` folder.
+
+### During class — taking attendance
+
+**Students submit via QR Code**
+
+1. In the **QR Code tab**, configure:
+   - **Server IP / hostname**: Your local IP or ngrok URL (e.g., `abc123.ngrok-free.app`)
+   - **Port**: `8501`
+   - **Use HTTPS**: ✅ **CHECK** when using ngrok (required for phone GPS)
+
+2. Click **Refresh QR now** to generate a fresh QR code (rotates every 20 seconds).
+
+3. Project the QR code on the classroom screen.
+
+4. Each student:
+   - Scans the QR code with their phone camera
+   - Enters their **Full name** and **Student ID**
+   - Allows location access when prompted
+   - Clicks **Submit Attendance**
+
+5. The student sees their classified amphitheatre and confirmation.
+
+6. The teacher watches the **Scan Log tab** — each entry shows student name, ID, predicted amphitheatre, timestamp, and source (`phone`).
+
+**If GPS fails** (HTTP or browser restrictions): Students click **"I am physically present"** — the entry is marked as manual check-in for teacher verification.
+
+### What the teacher sees
+
+| Element | What it tells you |
+|---------|------------------|
+| **Result card** | Which amphitheatre was predicted, which floor, distance to centroid |
+| **Vote chips** | How each model voted — purple = winner, grey = dissenter |
+| **Probability bars** | Model confidence across all 9 classes |
+| **Scan Log** | Running list of all submissions this session with timestamps |
+| **Distribution chart** | Bar chart of how many readings per amphitheatre |
+| **Stats row** | Total scans, inside count, outside count, average distance |
+
+### Interpreting results
+
+- **All chips agree** → high confidence, reliable prediction.
+- **Chips disagree** → GPS is ambiguous (likely a floor-pair case: 1/5, 2/6, 3/7, 4/8). Ask the student to confirm their floor verbally.
+- **"Outside" result** → the outside detector flagged this reading. The student is not inside any amphitheatre, or their GPS is too noisy.
+- **High probability bar for one class** → reliable. Low max probability (all bars roughly equal) → noisy GPS, treat with caution.
+
+### Session reset
+
+Click **Clear history** in the Scan Log tab to reset all counters and start a new session. The model predictions are not affected — only the session log is cleared.
 
 ---
 
 ## Key Design Decisions
 
-**No lat/lon in final features** — raw coordinates are replaced by distance-to-centroid features, which provide a cleaner, centroid-relative spatial representation and generalize better to GPS drift.
+**No lat/lon in final features** — raw coordinates are replaced by distance-to-centroid features, which provide a cleaner spatial representation and generalize better to GPS drift.
 
-**Centroids from train only** — computing centroids on the full dataset would leak validation/test spatial information into training features. All centroids are fit on train and applied uniformly to all splits.
+**Centroids from train only** — computing centroids on the full dataset would leak validation/test spatial information. All centroids are fit on train and applied uniformly to all splits.
 
-**Seat features excluded** — while highly discriminative in the collected data, seat self-reports can be faked by students wishing to game attendance. They are excluded to keep the system robust.
+**Seat features excluded** — while highly discriminative in collected data, seat self-reports can be faked by students wishing to game attendance. Excluded to keep the system robust.
 
-**Time features excluded** — `hour_sin/cos` and `day_of_week` encode the specific collection schedule of 3rd-year students. In production, any amphitheatre can be occupied at any hour; using time would cause the model to learn a timetable rather than spatial boundaries.
+**Time features excluded** — `hour_sin/cos` and `day_of_week` encode the specific collection schedule of 3rd-year students. In production any amphitheatre can be occupied at any hour; using time would cause the model to learn a timetable rather than spatial boundaries.
 
-**Confidence thresholding for Outside** — rather than training a second binary model, a single threshold on the multiclass model's maximum predicted probability gives better Outside recall with perfect precision and no added deployment complexity.
+**Binary outside detector as gate** — a dedicated `outside_detector.pkl` classifier runs first as a hard gate. If it predicts outside, no amphi classifier is called. This cleanly separates the two decisions.
 
-**Macro F1 as primary metric** — weighted F1 inflates scores by over-representing large classes (Amphi 2 has 2,564 samples vs Amphi 7's 72). Macro F1 gives each amphitheatre an equal vote, which matches the real-world cost of misclassification.
+**Ensemble majority vote** — all 5 classifiers (GBM, KNN, LR, DT, RF) vote; majority wins. This makes the interface transparent about model disagreement and is more robust than a single model for a live classroom demo.
+
+**Macro F1 as primary metric** — weighted F1 inflates scores by over-representing large classes (Amphi 2: 2,564 samples vs Amphi 7: 72). Macro F1 gives each amphitheatre an equal vote, matching the real-world cost of misclassification.
 
 ---
 
 ## Known Limitations
 
-1. **Stacked floor pairs** — Amphi 1/5, 2/6, 3/7, 4/8 share the same GPS footprint. GPS alone cannot reliably distinguish floors; the model uses accuracy and quality signals as indirect cues.
+1. **Stacked floor pairs** — Amphi 1/5, 2/6, 3/7, 4/8 share the same GPS footprint. GPS alone cannot reliably distinguish floors; the system can only predict the column, not the floor.
 2. **Amphi 7 data scarcity** — only 72 training samples, the lowest of all indoor classes. More collection data would improve its F1 (currently 0.9677).
 3. **Collection bias** — data was gathered almost entirely by 3rd-year students during their specific timetable. Generalization to other years or irregular schedules is untested.
-4. **Threshold tuning on test** — τ=0.7 was selected by evaluating on the test set. Ideally this would be validated on a separate held-out session to confirm it holds in production.
+4. **Inference feature hardcoding** — `build_features()` in `app.py` uses hardcoded scaling constants (mean/std). For production use, save and load the actual `StandardScaler` from `03_feature_engineering.ipynb` instead.
 5. **GPS boundary cases** — a small number of genuine outside readings land close to amphitheatre centroids. These are irreducible errors given the sensor's spatial resolution.
+6. **Single-session memory** — the Scan Log is stored in Streamlit session state and is lost on page refresh. For persistent attendance records, the history list should be exported to CSV.
