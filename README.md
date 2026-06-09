@@ -373,3 +373,11 @@ Click **Clear history** in the Scan Log tab to reset all counters and start a ne
 4. **Inference feature hardcoding** — `build_features()` in `app.py` uses hardcoded scaling constants (mean/std). For production use, save and load the actual `StandardScaler` from `03_feature_engineering.ipynb` instead.
 5. **GPS boundary cases** — a small number of genuine outside readings land close to amphitheatre centroids. These are irreducible errors given the sensor's spatial resolution.
 6. **Single-session memory** — the Scan Log is stored in Streamlit session state and is lost on page refresh. For persistent attendance records, the history list should be exported to CSV.
+
+
+## Demo 
+
+
+https://github.com/user-attachments/assets/46818152-323c-43b7-85b3-5787f5ad7ddb
+
+
