@@ -162,8 +162,8 @@ All models were tuned on the **training set only** via cross-validation. The val
 |-------|-------------|--------------|---------------|---------------|
 | KNN (k=5) | 0.9891 | 0.9888 | 0.9854 | 0.9851 |
 | Logistic Regression (C=5) | 0.8942 | 0.8950 | 0.8540 | 0.8527 |
-| Decision Tree (tuned) | — | — | — | — |
-| Random Forest (tuned) | — | — | — | — |
+| Decision Tree (tuned) | 0.9927 | 0.9925 | 0.9964 | 0.9963 |
+| Random Forest (tuned) | 0.9964 | 0.9963 | 1.0000 | 1.0000 |
 | **GBM — HistGradientBoosting** | **0.9930** | **0.9905** | **0.9950** | **0.9886** |
 
 ### GBM best hyperparameters
