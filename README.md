@@ -250,5 +250,7 @@ Click **Clear history** in the Scan Log tab to reset a session.
 ## Demo 
 
 
-Uploading amphilocator-ml-interface.mov…
+https://github.com/user-attachments/assets/35dc15b5-278a-4d25-8d69-0eea47ac304e
+
+
 
