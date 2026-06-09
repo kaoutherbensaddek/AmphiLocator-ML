@@ -101,31 +101,162 @@ def get_local_ip():
     except Exception:
         return "localhost"
 
-def build_features(lat, lon, accuracy):
-    dists  = {n: haversine(lat, lon, c[0], c[1]) for n, c in CENTROIDS.items()}
-    sd     = sorted(dists.values())
-    nd, d2 = sd[0], sd[1]
-    nn     = min(dists, key=dists.get)
-    ni     = list(CENTROIDS.keys()).index(nn)
-    AM, AS, DM, DS = 22.0, 15.0, 50.0, 40.0
-    LAM, LAS       = np.log1p(22.0), 0.8
-    hour = datetime.now().hour
-    scaled = {
-        "accuracy_mean_scaled": (accuracy-AM)/AS,
-        **{f"dist_Amphi_{i}_scaled": (dists[f"Amphi {i}"]-DM)/DS for i in range(1,9)},
-        "dist_nearest_scaled": (nd-DM)/DS, "dist_2nd_scaled": (d2-DM)/DS,
-        "dist_gap_scaled": (d2-nd)/DS,
-        "log_accuracy_scaled": (np.log1p(accuracy)-LAM)/LAS,
+# ---------------------------------------------------------------------------
+# DISTANCE HELPER
+# Training used Euclidean distance in degrees (not haversine).
+# All build_features_* functions must match this exactly.
+# ---------------------------------------------------------------------------
+def _euclidean_deg(lat, lon, clat, clon):
+    return math.sqrt((lat - clat) ** 2 + (lon - clon) ** 2)
+
+# ---------------------------------------------------------------------------
+# SCALER CONSTANTS
+# Recovered from data/processed/train/train_ready.csv (StandardScaler, ddof=0).
+# Used by KNN and LR which were trained on scaled features.
+# ---------------------------------------------------------------------------
+_SCALER = {
+    "latitude_mean":  (36.688358, 0.000039),
+    "longitude_mean": (2.866396,  0.000224),
+    "accuracy_mean":  (17.589954, 8.198170),
+    "sample_count":   (0.994523,  0.073806),
+    "dist_Amphi_1":   (0.000308,  0.000195),
+    "dist_Amphi_2":   (0.000201,  0.000145),
+    "dist_Amphi_3":   (0.000233,  0.000156),
+    "dist_Amphi_4":   (0.000288,  0.000197),
+    "dist_Amphi_5":   (0.000314,  0.000200),
+    "dist_Amphi_6":   (0.000202,  0.000146),
+    "dist_Amphi_7":   (0.000216,  0.000133),
+    "dist_Amphi_8":   (0.000263,  0.000184),
+    "dist_nearest":   (0.000050,  0.000048),
+    "dist_2nd":       (0.000066,  0.000051),
+    "dist_gap":       (0.000016,  0.000016),
+    "log_accuracy":   (2.810871,  0.498491),
+}
+
+def _sc(val, col):
+    """Standardise a single value using training-set mean/std."""
+    m, s = _SCALER[col]
+    return (val - m) / s
+
+# nearest_amphi_enc: LabelEncoder was fit with .fit(df['nearest_amphi'])
+# where nearest_amphi values are "Amphi 1".."Amphi 8" → alphabetical order → 0..7
+_AMPHI_KEYS_SORTED = sorted(CENTROIDS.keys())   # ['Amphi 1', 'Amphi 2', ..., 'Amphi 8']
+
+def _base_distances(lat, lon, accuracy):
+    """Shared spatial computation used by all three feature builders."""
+    dists   = {n: _euclidean_deg(lat, lon, c[0], c[1]) for n, c in CENTROIDS.items()}
+    sd      = sorted(dists.values())
+    nd, d2  = sd[0], sd[1]
+    nn      = min(dists, key=dists.get)
+    ni      = _AMPHI_KEYS_SORTED.index(nn)       # integer label encoding
+    log_acc = np.log1p(accuracy)
+    ha      = int(accuracy < 20)
+    hour    = datetime.now().hour
+    return dists, nd, d2, ni, log_acc, ha, hour
+
+# ---------------------------------------------------------------------------
+# GBM  — 19 unscaled features (gbm_metadata.json)
+# ---------------------------------------------------------------------------
+def _build_features_gbm(lat, lon, accuracy):
+    dists, nd, d2, ni, log_acc, ha, _ = _base_distances(lat, lon, accuracy)
+    row = {
+        **{f"dist_Amphi_{i}": dists[f"Amphi {i}"] for i in range(1, 9)},
+        "dist_nearest":          nd,
+        "dist_2nd":              d2,
+        "dist_gap":              d2 - nd,
+        "accuracy_mean":         accuracy,
+        "log_accuracy":          log_acc,
+        "accuracy_bin":          int(np.digitize(accuracy, [10, 25, 50, 100])),
+        "high_accuracy_flag":    ha,
+        "sample_count":          1,
+        "dist_nearest_x_logacc": nd * log_acc,
+        "dist_gap_x_highacc":    (d2 - nd) * ha,
+        "dist_nearest_sqrt":     math.sqrt(nd),
     }
-    binary = {
-        "high_accuracy_flag": int(accuracy<20), "has_seat": 0,
-        "accuracy_bin": int(np.digitize(accuracy,[10,25,50,100])),
-        "seat_block_enc": 0,
-        "hour_sin": np.sin(2*np.pi*hour/24), "hour_cos": np.cos(2*np.pi*hour/24),
-        "seat_row_filled": 0, "seat_column_filled": 0, "seat_zone_id": 0,
+    return pd.DataFrame([row])
+
+# ---------------------------------------------------------------------------
+# KNN / LR  — 32 scaled features + OHE nearest_amphi_enc
+# ---------------------------------------------------------------------------
+def _build_features_knn_lr(lat, lon, accuracy):
+    dists, nd, d2, ni, log_acc, ha, hour = _base_distances(lat, lon, accuracy)
+    row = {
+        "longitude_mean_scaled":  _sc(lon,      "longitude_mean"),
+        "latitude_mean_scaled":   _sc(lat,      "latitude_mean"),
+        "accuracy_mean_scaled":   _sc(accuracy, "accuracy_mean"),
+        **{f"dist_Amphi_{i}_scaled": _sc(dists[f"Amphi {i}"], f"dist_Amphi_{i}")
+           for i in range(1, 9)},
+        "dist_nearest_scaled":    _sc(nd,        "dist_nearest"),
+        "dist_2nd_scaled":        _sc(d2,        "dist_2nd"),
+        "dist_gap_scaled":        _sc(d2 - nd,   "dist_gap"),
+        "log_accuracy_scaled":    _sc(log_acc,   "log_accuracy"),
+        "high_accuracy_flag":     ha,
+        "has_seat":               0,
+        "accuracy_bin":           int(np.digitize(accuracy, [10, 25, 50, 100])),
+        "seat_block_enc":         0,
+        "hour_sin":               np.sin(2 * np.pi * hour / 24),
+        "hour_cos":               np.cos(2 * np.pi * hour / 24),
+        "seat_row_filled":        0,
+        "seat_column_filled":     0,
+        "seat_zone_id":           0,
+        **{f"nearest_amphi_enc_{j}": int(ni == j) for j in range(8)},
     }
-    ohe = {f"nearest_amphi_{i}": int(ni==i) for i in range(8)}
-    return pd.DataFrame([{**scaled, **binary, **ohe}])
+    return pd.DataFrame([row])
+
+# ---------------------------------------------------------------------------
+# DT / RF  — 37 unscaled features + extended interaction terms
+# ---------------------------------------------------------------------------
+def _build_features_dt_rf(lat, lon, accuracy):
+    dists, nd, d2, ni, log_acc, ha, hour = _base_distances(lat, lon, accuracy)
+    nd_sqrt = math.sqrt(nd)
+    row = {
+        "accuracy_mean":              accuracy,
+        "is_outside":                 0,          # gate already handled before calling DT/RF
+        "sample_count":               1,
+        **{f"dist_Amphi_{i}": dists[f"Amphi {i}"] for i in range(1, 9)},
+        "dist_nearest":               nd,
+        "dist_2nd":                   d2,
+        "dist_gap":                   d2 - nd,
+        "nearest_amphi_enc":          ni,
+        "log_accuracy":               log_acc,
+        "accuracy_bin":               int(np.digitize(accuracy, [10, 25, 50, 100])),
+        "high_accuracy_flag":         ha,
+        "has_seat":                   0,
+        "seat_block_enc":             0,
+        "seat_row_filled":            0,
+        "seat_column_filled":         0,
+        "seat_zone_id":               0,
+        "hour_sin":                   np.sin(2 * np.pi * hour / 24),
+        "hour_cos":                   np.cos(2 * np.pi * hour / 24),
+        "dist_nearest_x_logacc":      nd * log_acc,
+        "dist_gap_x_highacc":         (d2 - nd) * ha,
+        "dist_nearest_sqrt":          nd_sqrt,
+        "dist_2nd_sqrt":              math.sqrt(d2),
+        "dist_gap_sqrt":              math.sqrt(max(d2 - nd, 0)),
+        "dist_nearest_x_2nd":         nd * d2,
+        "dist_gap_ratio":             (d2 - nd) / (nd + 1e-9),
+        "dist_nearest_x_acc":         nd * accuracy,
+        "nearest_x_high_acc":         ni * ha,
+        "sample_x_high_acc":          1 * ha,
+        "dist_nearest_sq":            nd ** 2,
+        "dist_gap_x_nearest_sqrt":    (d2 - nd) * nd_sqrt,
+    }
+    return pd.DataFrame([row])
+
+# ---------------------------------------------------------------------------
+# Public router — returns the right feature DataFrame for each model key
+# ---------------------------------------------------------------------------
+_FEATURE_BUILDERS = {
+    "gbm": _build_features_gbm,
+    "knn": _build_features_knn_lr,
+    "lr":  _build_features_knn_lr,
+    "dt":  _build_features_dt_rf,
+    "rf":  _build_features_dt_rf,
+}
+
+def build_features(lat, lon, accuracy, model_key="gbm"):
+    """Return the feature DataFrame for the given model key."""
+    return _FEATURE_BUILDERS[model_key](lat, lon, accuracy)
 
 def decode_label(pred_encoded, label_enc):
     if label_enc:
@@ -151,15 +282,23 @@ def classify(lat, lon, accuracy=25.0):
 
     if active:
         try:
-            feats   = build_features(lat, lon, accuracy)
-            outside = MODELS.get("outside")
-            is_out  = bool(outside.predict(feats)[0]) if outside else False
+            # outside_detector is saved as a metadata dict (method="none"),
+            # so outside detection falls through to the ensemble vote instead.
+            outside_meta = MODELS.get("outside")
+            is_out = False
+            if isinstance(outside_meta, dict) and outside_meta.get("method") == "none":
+                pass  # no binary gate; Outside handled by ensemble vote
+            elif outside_meta is not None and hasattr(outside_meta, "predict"):
+                feats_gbm = build_features(lat, lon, accuracy, "gbm")
+                is_out = bool(outside_meta.predict(feats_gbm)[0])
+
             if is_out:
                 label = "Outside"; vb = {k: "Outside" for k in active}; vu = len(active)
             else:
                 votes = []; ap = {}
                 for key, model in active.items():
                     try:
+                        feats = build_features(lat, lon, accuracy, key)
                         pn = decode_label(model.predict(feats)[0], le)
                         vb[key] = pn; votes.append(pn); vu += 1
                         if hasattr(model, "predict_proba"):
